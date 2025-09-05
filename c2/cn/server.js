@@ -18,7 +18,7 @@ const mongoUri = 'mongodb+srv://userr:Wn05aztlPhgUWWl8@cluster0.iiuatyc.mongodb.
 
 mongoose.connect(mongoUri)
   .then(() => console.log('✅ MongoDB connected'))
-  .catch(err => console.error('❌ MongoDB connection error:', err));
+  .catch(err => console.error(' MongoDB connection error:', err));
 
 // ===== Middleware: verify JWT =====
 function auth(req, res, next) {
@@ -137,4 +137,4 @@ cron.schedule('*/5 * * * *', async () => {
 
 // ===== Start Server =====
 const PORT = 3001;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(` Server running on port ${PORT}`));
