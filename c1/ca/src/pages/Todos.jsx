@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from "react";
 
-export default function Todos({ token, onLogout }) {
+export default function Todos({ token, onLogout, onPerformance }) {
   const [todos, setTodos] = useState([]);
   const [text, setText] = useState("");
   const [deadline, setDeadline] = useState("");
+  const [repeatDays, setRepeatDays] = useState([]); // ✅ NEW state
 
   // Fetch todos
   useEffect(() => {
@@ -18,19 +19,20 @@ export default function Todos({ token, onLogout }) {
   // Add todo
   async function handleAdd(e) {
     e.preventDefault();
-    if (!text || !deadline) return;
+    if (!text) return;
     const res = await fetch("http://localhost:3001/api/todos", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ text, deadline }),
+      body: JSON.stringify({ text, deadline, repeatDays }), // ✅ send repeatDays
     });
     const data = await res.json();
     setTodos([...todos, data]);
     setText("");
     setDeadline("");
+    setRepeatDays([]);
   }
 
   // Toggle complete
@@ -58,7 +60,9 @@ export default function Todos({ token, onLogout }) {
 
   // Completion Rate
   const completedCount = todos.filter((t) => t.completed).length;
-  const completionRate = todos.length ? Math.round((completedCount / todos.length) * 100) : 0;
+  const completionRate = todos.length
+    ? Math.round((completedCount / todos.length) * 100)
+    : 0;
 
   // Sort: incomplete first by deadline, then completed at bottom
   const sortedTodos = [...todos].sort((a, b) => {
@@ -73,23 +77,49 @@ export default function Todos({ token, onLogout }) {
   // Priority color
   function getPriority(deadline, completed) {
     if (completed) return "bg-gray-100 border-gray-400";
+    if (!deadline) return "bg-green-100 border-green-400";
     const diff = (new Date(deadline) - new Date()) / (1000 * 60 * 60); // hours left
     if (diff <= 6) return "bg-red-100 border-red-400";
     if (diff <= 12) return "bg-yellow-100 border-yellow-400";
     return "bg-green-100 border-green-400";
   }
 
+  // Toggle repeat day
+  function toggleDay(day) {
+    setRepeatDays((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
+    );
+  }
+
+  const days = [
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+  ];
+
   return (
     <div className="min-h-screen bg-gray-100 p-6">
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold text-blue-600">My Todos</h1>
-        <button
-          onClick={onLogout}
-          className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
-        >
-          Logout
-        </button>
+        <div className="flex gap-3">
+          <button
+            onClick={onPerformance}
+            className="px-4 py-2 bg-blue-500 text-white rounded-xl hover:bg-blue-600"
+          >
+            👤
+          </button>
+          <button
+            onClick={onLogout}
+            className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
+          >
+            Logout
+          </button>
+        </div>
       </div>
 
       {/* Progress Bar */}
@@ -108,12 +138,12 @@ export default function Todos({ token, onLogout }) {
       {/* Add Todo */}
       <form
         onSubmit={handleAdd}
-        className="flex gap-3 mb-6 bg-white p-4 shadow rounded"
+        className="flex flex-col gap-3 mb-6 bg-white p-4 shadow rounded"
       >
         <input
           type="text"
           placeholder="Enter todo..."
-          className="flex-1 border p-2 rounded"
+          className="border p-2 rounded"
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
@@ -123,9 +153,27 @@ export default function Todos({ token, onLogout }) {
           value={deadline}
           onChange={(e) => setDeadline(e.target.value)}
         />
+
+        {/* Repeat Days Selection */}
+        <div>
+          <label className="block mb-2 font-medium">Repeat on:</label>
+          <div className="flex gap-3 flex-wrap">
+            {days.map((day) => (
+              <label key={day} className="flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={repeatDays.includes(day)}
+                  onChange={() => toggleDay(day)}
+                />
+                {day.charAt(0).toUpperCase() + day.slice(1)}
+              </label>
+            ))}
+          </div>
+        </div>
+
         <button
           type="submit"
-          className="bg-blue-600 text-white px-4 rounded hover:bg-blue-700"
+          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
         >
           Add
         </button>
@@ -154,9 +202,27 @@ export default function Todos({ token, onLogout }) {
                 >
                   {todo.text}
                 </span>
-                <p className="text-sm text-gray-600">
-                  Deadline: {new Date(todo.deadline).toLocaleString()}
-                </p>
+                {todo.deadline && (
+                  <p className="text-sm text-gray-600">
+                    Deadline:{" "}
+                    {new Date(todo.deadline).toLocaleString("en-IN", {
+                      timeZone: "Asia/Kolkata",
+                      hour12: true,
+                      weekday: "short",
+                      day: "2-digit",
+                      month: "short",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </p>
+                )}
+
+                {todo.repeatDays?.length > 0 && (
+                  <p className="text-xs text-blue-500">
+                    🔁 Repeats: {todo.repeatDays.join(", ")}
+                  </p>
+                )}
               </div>
               <button
                 onClick={() => handleDelete(todo._id)}

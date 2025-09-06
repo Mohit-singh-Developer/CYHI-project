@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Todos from "./pages/Todos";
+import PerformancePage from "./pages/PerformancePage";
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("token"));
@@ -35,7 +36,15 @@ export default function App() {
       )}
 
       {view === "todos" && (
-        <Todos token={token} onLogout={handleLogout} />
+        <Todos
+          token={token}
+          onLogout={handleLogout}
+          onPerformance={() => setView("performance")}
+        />
+      )}
+
+      {view === "performance" && (
+        <PerformancePage token={token} onBack={() => setView("todos")} />
       )}
     </div>
   );
