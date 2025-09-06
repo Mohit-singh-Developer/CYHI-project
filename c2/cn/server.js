@@ -4,7 +4,14 @@ const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const cron = require('node-cron');
-const dayjs = require("dayjs"); // for recurring tasks
+const dayjs = require('dayjs');
+const utc = require('dayjs/plugin/utc');
+const timezone = require('dayjs/plugin/timezone');
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+// Default all dayjs "local" ops to IST (for weekday/duplicate checks and endOf('day'))
+dayjs.tz.setDefault('Asia/Kolkata');
 
 const User = require('./models/User');
 const Todo = require('./models/Todo');
@@ -16,10 +23,10 @@ app.use(express.json());
 
 // ===== MongoDB connection =====
 const mongoUri = 'mongodb+srv://userr:6wBZot54GSTjYnSD@cluster0.iiuatyc.mongodb.net/';
-
-mongoose.connect(mongoUri)
+mongoose
+  .connect(mongoUri)
   .then(() => console.log('✅ MongoDB connected'))
-  .catch(err => console.error('❌ MongoDB connection error:', err));
+  .catch((err) => console.error('❌ MongoDB connection error:', err));
 
 // ===== Middleware: verify JWT =====
 function auth(req, res, next) {
@@ -63,6 +70,24 @@ app.post('/api/login', async (req, res) => {
   res.json({ token });
 });
 
+// ===== Helpers =====
+function normalizeDeadline(deadline) {
+  if (!deadline) return null;
+
+  // If the client sends ISO (recommended), this returns the correct instant:
+  // e.g., "2025-09-06T11:30:00.000Z"
+  // Otherwise, if a bare "YYYY-MM-DDTHH:mm" sneaks in, assume IST and convert.
+  if (
+    typeof deadline === 'string' &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(deadline) &&
+    !/[zZ]|[+-]\d{2}:\d{2}$/.test(deadline)
+  ) {
+    return dayjs.tz(deadline, 'YYYY-MM-DDTHH:mm', 'Asia/Kolkata').toDate();
+  }
+
+  return new Date(deadline);
+}
+
 // ===== Todo Routes =====
 // Get todos
 app.get('/api/todos', auth, async (req, res) => {
@@ -70,20 +95,22 @@ app.get('/api/todos', auth, async (req, res) => {
   res.json(todos);
 });
 
-// Add todo (with repeatDays support)
+// Add todo (supports repeatDays; deadline normalized)
 app.post('/api/todos', auth, async (req, res) => {
   try {
     const { text, deadline, repeatDays } = req.body;
+
     const todo = new Todo({
       text,
-      deadline,
+      deadline: normalizeDeadline(deadline),
       userId: req.userId,
-      repeatDays: repeatDays || [], // save repeat days
+      repeatDays: Array.isArray(repeatDays) ? repeatDays : [],
     });
+
     const saved = await todo.save();
     res.status(201).json(saved);
   } catch (err) {
-    console.error(err);a
+    console.error(err);
     res.status(400).json({ error: 'Failed to add todo' });
   }
 });
@@ -94,12 +121,18 @@ app.put('/api/todos/:id', auth, async (req, res) => {
     const { text, completed, deadline, repeatDays } = req.body;
     const updated = await Todo.findOneAndUpdate(
       { _id: req.params.id, userId: req.userId },
-      { text, completed, deadline, repeatDays },
+      {
+        text,
+        completed,
+        deadline: normalizeDeadline(deadline),
+        repeatDays: Array.isArray(repeatDays) ? repeatDays : [],
+      },
       { new: true }
     );
     if (!updated) return res.status(404).json({ error: 'Todo not found' });
     res.json(updated);
-  } catch {
+  } catch (err) {
+    console.error(err);
     res.status(400).json({ error: 'Failed to update todo' });
   }
 });
@@ -109,13 +142,14 @@ app.delete('/api/todos/:id', auth, async (req, res) => {
   try {
     await Todo.findOneAndDelete({ _id: req.params.id, userId: req.userId });
     res.sendStatus(204);
-  } catch {
+  } catch (err) {
+    console.error(err);
     res.status(400).json({ error: 'Failed to delete todo' });
   }
 });
 
 // ================= User Performance Route =================
-app.get("/api/performance", auth, async (req, res) => {
+app.get('/api/performance', auth, async (req, res) => {
   try {
     const todos = await Todo.find({ userId: req.userId });
 
@@ -137,91 +171,96 @@ app.get("/api/performance", auth, async (req, res) => {
     ).length;
 
     const completedOnTime = todos.filter(
-      (t) =>
-        t.completed &&
-        t.deadline &&
-        new Date(t.updatedAt) <= new Date(t.deadline)
+      (t) => t.completed && t.deadline && new Date(t.updatedAt) <= new Date(t.deadline)
     ).length;
 
     const completedLate = todos.filter(
-      (t) =>
-        t.completed &&
-        t.deadline &&
-        new Date(t.updatedAt) > new Date(t.deadline)
+      (t) => t.completed && t.deadline && new Date(t.updatedAt) > new Date(t.deadline)
     ).length;
 
     res.json({
       total,
       completed,
-      completionRate: ((completed / total) * 100).toFixed(1),
+      completionRate: Number(((completed / total) * 100).toFixed(1)),
       overdue,
       completedOnTime,
       completedLate,
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Failed to fetch performance" });
+    res.status(500).json({ error: 'Failed to fetch performance' });
   }
 });
 
-// ===== Cron Job: check deadlines =====
-cron.schedule('*/5 * * * *', async () => {
-  console.log("⏰ Checking deadlines...");
-  const now = new Date();
-  const soon = new Date(now.getTime() + 2 * 60 * 60 * 1000); // within 2 hours
+// ===== Cron Job: deadline reminders (runs on IST clock) =====
+cron.schedule(
+  '*/5 * * * *',
+  async () => {
+    console.log('⏰ Checking deadlines (IST)...');
+    const now = new Date(); // absolute time now
+    const soon = new Date(now.getTime() + 2 * 60 * 60 * 1000); // +2 hours
 
-  try {
-    const todos = await Todo.find({
-      completed: false,
-      deadline: { $lte: soon, $gte: now }
-    }).populate('userId');
+    try {
+      const todos = await Todo.find({
+        completed: false,
+        deadline: { $lte: soon, $gte: now },
+      }).populate('userId');
 
-    for (let todo of todos) {
-      if (todo.userId && todo.userId.email) {
-        await sendDeadlineEmail(todo.userId.email, todo);
-        console.log(`📧 Reminder sent to ${todo.userId.email} for "${todo.text}"`);
+      for (let todo of todos) {
+        if (todo.userId && todo.userId.email) {
+          await sendDeadlineEmail(todo.userId.email, todo);
+          console.log(`📧 Reminder sent to ${todo.userId.email} for "${todo.text}"`);
+        }
       }
+    } catch (err) {
+      console.error('Cron job error:', err);
     }
-  } catch (err) {
-    console.error("Cron job error:", err);
-  }
-});
+  },
+  { timezone: 'Asia/Kolkata' }
+);
 
-// ===== Cron Job: recurring tasks =====
-cron.schedule("1 0 * * *", async () => {
-  console.log("🔄 Checking for recurring tasks...");
+// ===== Cron Job: recurring tasks (runs daily 00:01 IST) =====
+cron.schedule(
+  '1 0 * * *',
+  async () => {
+    console.log('🔄 Checking for recurring tasks (IST)...');
 
-  const today = dayjs().format("dddd").toLowerCase(); // e.g., "monday"
+    const today = dayjs().format('dddd').toLowerCase(); // IST weekday
 
-  try {
-    const recurringTodos = await Todo.find({ repeatDays: today });
+    try {
+      const recurringTodos = await Todo.find({ repeatDays: today });
 
-    for (let todo of recurringTodos) {
-      // Check if today's copy already exists (avoid duplicates)
-      const exists = await Todo.findOne({
-        userId: todo.userId,
-        text: todo.text,
-        createdAt: {
-          $gte: dayjs().startOf("day").toDate(),
-          $lte: dayjs().endOf("day").toDate(),
-        },
-      });
+      for (let todo of recurringTodos) {
+        // Check if today's copy already exists (avoid duplicates) in IST day window
+        const start = dayjs().startOf('day').toDate(); // IST start of day instant
+        const end = dayjs().endOf('day').toDate(); // IST end of day instant
 
-      if (!exists) {
-        const newTask = new Todo({
-          text: todo.text,
-          deadline: todo.deadline ? dayjs().endOf("day").toDate() : null,
+        const exists = await Todo.findOne({
           userId: todo.userId,
-          repeatDays: todo.repeatDays,
+          text: todo.text,
+          createdAt: { $gte: start, $lte: end },
         });
-        await newTask.save();
-        console.log(`✅ Created recurring task for ${today}: "${todo.text}"`);
+
+        if (!exists) {
+          const newTask = new Todo({
+            text: todo.text,
+            // if original has a time keep same clock time today in IST; else end-of-day IST
+            deadline: todo.deadline
+              ? dayjs(todo.deadline).tz().set('year', dayjs().year()).set('month', dayjs().month()).set('date', dayjs().date()).toDate()
+              : dayjs().endOf('day').toDate(),
+            userId: todo.userId,
+            repeatDays: todo.repeatDays,
+          });
+          await newTask.save();
+          console.log(`✅ Created recurring task for ${today}: "${todo.text}"`);
+        }
       }
+    } catch (err) {
+      console.error('Recurring tasks cron error:', err);
     }
-  } catch (err) {
-    console.error("Recurring tasks cron error:", err);
-  }
-});
+  },
+  { timezone: 'Asia/Kolkata' }
+);
 
 // ===== Start Server =====
 const PORT = 3001;

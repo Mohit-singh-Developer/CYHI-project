@@ -5,6 +5,7 @@ export default function Register({ onSwitch }) {
   const [password, setPassword] = useState("");
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
+  
 
   async function handleSubmit(e) {
     e.preventDefault();

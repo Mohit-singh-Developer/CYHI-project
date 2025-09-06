@@ -4,7 +4,7 @@ export default function Todos({ token, onLogout, onPerformance }) {
   const [todos, setTodos] = useState([]);
   const [text, setText] = useState("");
   const [deadline, setDeadline] = useState("");
-  const [repeatDays, setRepeatDays] = useState([]); // ✅ NEW state
+  const [repeatDays, setRepeatDays] = useState([]);
 
   // Fetch todos
   useEffect(() => {
@@ -20,14 +20,23 @@ export default function Todos({ token, onLogout, onPerformance }) {
   async function handleAdd(e) {
     e.preventDefault();
     if (!text) return;
+
+    // Convert the datetime-local string to an absolute UTC instant
+    const payload = {
+      text,
+      repeatDays,
+      deadline: deadline ? new Date(deadline).toISOString() : null,
+    };
+
     const res = await fetch("http://localhost:3001/api/todos", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ text, deadline, repeatDays }), // ✅ send repeatDays
+      body: JSON.stringify(payload),
     });
+
     const data = await res.json();
     setTodos([...todos, data]);
     setText("");
@@ -43,7 +52,11 @@ export default function Todos({ token, onLogout, onPerformance }) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ ...todo, completed: !todo.completed }),
+      body: JSON.stringify({
+        ...todo,
+        completed: !todo.completed,
+        // keep deadline untouched; if you ever edit it, send ISO again
+      }),
     });
     const updated = await res.json();
     setTodos(todos.map((t) => (t._id === updated._id ? updated : t)));
@@ -60,18 +73,15 @@ export default function Todos({ token, onLogout, onPerformance }) {
 
   // Completion Rate
   const completedCount = todos.filter((t) => t.completed).length;
-  const completionRate = todos.length
-    ? Math.round((completedCount / todos.length) * 100)
-    : 0;
+  const completionRate = todos.length ? Math.round((completedCount / todos.length) * 100) : 0;
 
   // Sort: incomplete first by deadline, then completed at bottom
   const sortedTodos = [...todos].sort((a, b) => {
-    if (a.completed !== b.completed) {
-      return a.completed ? 1 : -1;
-    }
-    const timeA = new Date(a.deadline) - new Date();
-    const timeB = new Date(b.deadline) - new Date();
-    return timeA - timeB;
+    if (a.completed !== b.completed) return a.completed ? 1 : -1;
+    if (!a.deadline && !b.deadline) return 0;
+    if (!a.deadline) return 1;
+    if (!b.deadline) return -1;
+    return new Date(a.deadline) - new Date(b.deadline);
   });
 
   // Priority color
@@ -86,20 +96,10 @@ export default function Todos({ token, onLogout, onPerformance }) {
 
   // Toggle repeat day
   function toggleDay(day) {
-    setRepeatDays((prev) =>
-      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
-    );
+    setRepeatDays((prev) => (prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]));
   }
 
-  const days = [
-    "monday",
-    "tuesday",
-    "wednesday",
-    "thursday",
-    "friday",
-    "saturday",
-    "sunday",
-  ];
+  const days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 
   return (
     <div className="min-h-screen bg-gray-100 p-6">
@@ -124,22 +124,14 @@ export default function Todos({ token, onLogout, onPerformance }) {
 
       {/* Progress Bar */}
       <div className="mb-6">
-        <p className="mb-1 font-medium text-gray-700">
-          Completion Rate: {completionRate}%
-        </p>
+        <p className="mb-1 font-medium text-gray-700">Completion Rate: {completionRate}%</p>
         <div className="w-full bg-gray-300 rounded h-4">
-          <div
-            className="bg-blue-500 h-4 rounded"
-            style={{ width: `${completionRate}%` }}
-          ></div>
+          <div className="bg-blue-500 h-4 rounded" style={{ width: `${completionRate}%` }}></div>
         </div>
       </div>
 
       {/* Add Todo */}
-      <form
-        onSubmit={handleAdd}
-        className="flex flex-col gap-3 mb-6 bg-white p-4 shadow rounded"
-      >
+      <form onSubmit={handleAdd} className="flex flex-col gap-3 mb-6 bg-white p-4 shadow rounded">
         <input
           type="text"
           placeholder="Enter todo..."
@@ -147,6 +139,7 @@ export default function Todos({ token, onLogout, onPerformance }) {
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
+
         <input
           type="datetime-local"
           className="border p-2 rounded"
@@ -171,10 +164,7 @@ export default function Todos({ token, onLogout, onPerformance }) {
           </div>
         </div>
 
-        <button
-          type="submit"
-          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-        >
+        <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
           Add
         </button>
       </form>
@@ -195,13 +185,10 @@ export default function Todos({ token, onLogout, onPerformance }) {
                   onChange={() => toggleComplete(todo)}
                   className="mr-2"
                 />
-                <span
-                  className={`${
-                    todo.completed ? "line-through text-gray-500" : "font-medium"
-                  }`}
-                >
+                <span className={`${todo.completed ? "line-through text-gray-500" : "font-medium"}`}>
                   {todo.text}
                 </span>
+
                 {todo.deadline && (
                   <p className="text-sm text-gray-600">
                     Deadline:{" "}
@@ -219,15 +206,10 @@ export default function Todos({ token, onLogout, onPerformance }) {
                 )}
 
                 {todo.repeatDays?.length > 0 && (
-                  <p className="text-xs text-blue-500">
-                    🔁 Repeats: {todo.repeatDays.join(", ")}
-                  </p>
+                  <p className="text-xs text-blue-500">🔁 Repeats: {todo.repeatDays.join(", ")}</p>
                 )}
               </div>
-              <button
-                onClick={() => handleDelete(todo._id)}
-                className="text-red-500 hover:text-red-700"
-              >
+              <button onClick={() => handleDelete(todo._id)} className="text-red-500 hover:text-red-700">
                 ✖
               </button>
             </div>
