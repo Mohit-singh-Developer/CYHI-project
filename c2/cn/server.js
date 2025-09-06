@@ -14,7 +14,7 @@ app.use(cors());
 app.use(express.json());
 
 // ===== MongoDB connection =====
-const mongoUri = 'mongodb+srv://userr:Wn05aztlPhgUWWl8@cluster0.iiuatyc.mongodb.net/todos?retryWrites=true&w=majority&appName=Cluster0';
+const mongoUri = 'mongodb+srv://userr:6wBZot54GSTjYnSD@cluster0.iiuatyc.mongodb.net/';
 
 mongoose.connect(mongoUri)
   .then(() => console.log('✅ MongoDB connected'))
